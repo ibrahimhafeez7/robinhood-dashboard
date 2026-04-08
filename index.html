@@ -38,6 +38,13 @@
   .topbar-right { display: flex; align-items: center; gap: 12px; }
   .live-badge { display: flex; align-items: center; gap: 6px; font-size: 12px; background: #e6fce6; color: #166016; padding: 4px 12px; border-radius: 20px; font-weight: 500; }
   @media (prefers-color-scheme: dark) { .live-badge { background: #0d2e0d; color: #5ee85e; } }
+  .hours-badge { font-size: 11px; padding: 3px 10px; border-radius: 20px; font-weight: 500; display: none; }
+  .hours-badge.extended { background: #fff8e8; color: #7a5a00; border: 1px solid #f0c040; }
+  .hours-badge.closed   { background: #f0f0f0; color: #666; border: 1px solid #ddd; }
+  @media (prefers-color-scheme: dark) {
+    .hours-badge.extended { background: #2a2000; color: #ffd060; border-color: #7a6000; }
+    .hours-badge.closed   { background: #2a2a2a; color: #aaa; border-color: #444; }
+  }
   .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: blink 1.5s infinite; }
   @keyframes blink { 0%,100%{opacity:1}50%{opacity:0.3} }
   .timestamp { font-size: 12px; color: var(--subtle); }
@@ -152,6 +159,7 @@
     </div>
     <div class="topbar-right">
       <div class="live-badge"><span class="live-dot"></span><span id="live-label">Connecting...</span></div>
+      <span class="hours-badge" id="hours-badge"></span>
       <span class="timestamp" id="ts">—</span>
       <button class="refresh-btn" onclick="loadData(true)">↻ Refresh</button>
     </div>
@@ -187,6 +195,7 @@
               <th style="width:9%">Weight</th>
               <th style="width:9%">Gain $</th>
               <th style="width:10%">Gain %</th>
+              <th style="width:5%">Hrs</th>
             </tr>
           </thead>
           <tbody id="pos-tbody">
@@ -220,7 +229,7 @@
   const API = API_BASE + "/api/portfolio";
   const HEALTH = API_BASE + "/api/health";
   const REFRESH_MS = 60_000;
-  const WAKE_TIMEOUT_MS = 120_000; // 60s max wait for cold start
+  const WAKE_TIMEOUT_MS = 60_000; // 60s max wait for cold start
 
   const ALL_SECTORS = [
     { name:"Basic Materials",        icon:"⛏", color:"#8B6914" },
@@ -235,7 +244,6 @@
     { name:"Technology",             icon:"💻", color:"#378ADD" },
     { name:"Utilities",              icon:"🔌", color:"#4A9A6E" },
     { name:"Precious Metals",        icon:"🪙", color:"#B8860B" },
-    { name:"Broader Market ETF",     icon:"🌍", color:"#8A2BE2" },
   ];
   const PIE_COLORS = ["#378ADD","#00C805","#FF5000","#8A2BE2","#F4C430","#0F6E56","#D4537E","#BA7517","#185FA5","#4A9A6E","#B8860B","#E24B4A"];
 
@@ -303,13 +311,16 @@
   function renderTable(positions) {
     const tbody = document.getElementById("pos-tbody");
     if (!positions.length) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:2rem 0">No positions found.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--muted);padding:2rem 0">No positions found.</td></tr>`;
       return;
     }
     tbody.innerHTML = positions.map(p => {
       const gc = sign(p.gain_loss);
       const badge = `<span class="badge badge-${p.type}">${p.type.toUpperCase()}</span>`;
       const shares = Number.isInteger(p.shares) ? p.shares : p.shares.toFixed(4).replace(/\.?0+$/,"");
+      const hrsBadge = p.is_extended_hours
+        ? `<span style="font-size:9px;background:#fff8e8;color:#7a5a00;padding:1px 5px;border-radius:4px;border:0.5px solid #f0c040">AH</span>`
+        : `<span style="font-size:9px;color:var(--subtle)">—</span>`;
       return `<tr>
         <td><div class="ticker-sym">${p.ticker}${badge}</div><div class="ticker-name">${p.name}</div></td>
         <td>${shares}</td>
@@ -319,6 +330,7 @@
         <td>${p.weight.toFixed(1)}%</td>
         <td class="${gc}">${fmt$(p.gain_loss)}</td>
         <td class="${gc}">${fmtPct(p.gain_pct)}</td>
+        <td style="text-align:center">${hrsBadge}</td>
       </tr>`;
     }).join("");
   }
@@ -384,6 +396,21 @@
     }
   }
 
+  function renderMarketStatus(marketIsOpen, extendedActive) {
+    const badge = document.getElementById("hours-badge");
+    if (marketIsOpen) {
+      badge.style.display = "none";
+    } else if (extendedActive) {
+      badge.className = "hours-badge extended";
+      badge.textContent = "⏰ After hours prices";
+      badge.style.display = "inline-block";
+    } else {
+      badge.className = "hours-badge closed";
+      badge.textContent = "Market closed · last close prices";
+      badge.style.display = "inline-block";
+    }
+  }
+
   async function loadData(manual = false) {
     try {
       // Quick health check — if it fails, the server is sleeping, show wake overlay
@@ -414,6 +441,7 @@
       document.getElementById("ts").textContent = "Updated " + updated.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",second:"2-digit"});
       document.getElementById("live-label").textContent = "Live";
       renderTokenWarning(d.token_days_left);
+      renderMarketStatus(d.market_is_open, d.extended_hours_active);
 
     } catch(e) {
       showError(`Could not load data: ${e.message}`);
